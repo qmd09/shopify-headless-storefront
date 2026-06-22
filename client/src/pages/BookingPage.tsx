@@ -163,13 +163,16 @@ function todayIso() {
 
 // ─── Booking phase ─────────────────────────────────────────────────────────────
 
-type BookingPhase = 'idle' | 'finding-product' | 'creating-cart' | 'redirecting' | 'error-no-product' | 'error-cart';
+type BookingPhase = 'idle' | 'finding-product' | 'creating-cart' | 'redirecting' | 'creating-ticket' | 'error-cart';
 
 const PHASE_LABELS: Partial<Record<BookingPhase, string>> = {
-  'finding-product': 'Finding service product…',
+  'finding-product': 'Checking Shopify catalogue…',
   'creating-cart': 'Creating Shopify cart…',
   redirecting: 'Redirecting to Shopify checkout…',
+  'creating-ticket': 'Creating job card…',
 };
+
+const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001';
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -239,12 +242,32 @@ export default function BookingPage() {
     setStep((s) => s + 1);
   }
 
-  // ── Confirm — Shopify Cart flow ─────────────────────────────────────────────
+  // ── Confirm — Shopify Cart flow with ServiceNow fallback ───────────────────
+  //
+  // Primary path (real Shopify store): find Hub Service product → cartCreate
+  //   with line item attributes → redirect to checkoutUrl.
+  // Fallback (mock.shop / no Hub Service products): POST directly to the
+  //   ServiceNow server and navigate to /booking-confirmation. This keeps the
+  //   demo working end-to-end without requiring Shopify product configuration.
 
   async function handleConfirm() {
     if (!selectedService || !service) return;
+    const bookingRef = `BOOK-${Date.now()}`;
+    const orderNumber = `#HUB-${Math.floor(Math.random() * 9000 + 1000)}`;
+
+    const bookingBase = {
+      ref: bookingRef, orderNumber,
+      serviceType: selectedService, serviceLabel: service.label,
+      price: service.price, duration: service.duration,
+      location: form.location, date: form.date, timeSlot: form.timeSlot,
+      firstName: form.firstName, lastName: form.lastName,
+      email: form.email, phone: form.phone,
+      rego: form.rego.toUpperCase(), make: form.make, model: form.model, year: form.year,
+    };
+
     setPhase('finding-product');
     try {
+      // ── Try Shopify path ──────────────────────────────────────────────────
       const data = await shopifyQuery(`{
         products(first: 10, query: "product_type:Hub Service") {
           edges {
@@ -263,65 +286,95 @@ export default function BookingPage() {
         (e: { node: { title: string; variants: { edges: Array<{ node: { id: string; price: { amount: string } } }> } } }) => e.node
       );
       const matched = matchVariant(productNodes, selectedService);
-      if (!matched) { setPhase('error-no-product'); return; }
 
-      const bookingRef = `BOOK-${Date.now()}`;
-      const orderNumber = `#HUB-${Math.floor(Math.random() * 9000 + 1000)}`;
-
-      setPhase('creating-cart');
-      const cartData = await shopifyQuery(
-        `mutation CartCreate($input: CartInput!) {
-          cartCreate(input: $input) {
-            cart { id checkoutUrl totalQuantity }
-            userErrors { field message }
+      if (matched) {
+        // Hub Service product found — create Shopify cart and redirect to checkout
+        setPhase('creating-cart');
+        const cartData = await shopifyQuery(
+          `mutation CartCreate($input: CartInput!) {
+            cartCreate(input: $input) {
+              cart { id checkoutUrl totalQuantity }
+              userErrors { field message }
+            }
+          }`,
+          {
+            input: {
+              lines: [{
+                merchandiseId: matched.variantId,
+                quantity: 1,
+                attributes: [
+                  { key: 'Booking Ref', value: bookingRef },
+                  { key: 'Service Type', value: selectedService },
+                  { key: 'Location', value: form.location },
+                  { key: 'Appointment Date', value: form.date },
+                  { key: 'Appointment Time', value: form.timeSlot },
+                  { key: 'Vehicle Rego', value: form.rego.toUpperCase() },
+                  { key: 'Vehicle Make', value: form.make },
+                  { key: 'Vehicle Model', value: form.model },
+                  { key: 'Vehicle Year', value: form.year },
+                  { key: 'Customer Phone', value: form.phone },
+                  { key: 'Customer Name', value: `${form.firstName} ${form.lastName}` },
+                  { key: 'Customer Email', value: form.email },
+                ],
+              }],
+            },
           }
-        }`,
-        {
-          input: {
-            lines: [{
-              merchandiseId: matched.variantId,
-              quantity: 1,
-              attributes: [
-                { key: 'Booking Ref', value: bookingRef },
-                { key: 'Service Type', value: selectedService },
-                { key: 'Location', value: form.location },
-                { key: 'Appointment Date', value: form.date },
-                { key: 'Appointment Time', value: form.timeSlot },
-                { key: 'Vehicle Rego', value: form.rego.toUpperCase() },
-                { key: 'Vehicle Make', value: form.make },
-                { key: 'Vehicle Model', value: form.model },
-                { key: 'Vehicle Year', value: form.year },
-                { key: 'Customer Phone', value: form.phone },
-                { key: 'Customer Name', value: `${form.firstName} ${form.lastName}` },
-                { key: 'Customer Email', value: form.email },
-              ],
-            }],
-          },
-        }
-      );
+        );
 
-      const cart = cartData?.cartCreate?.cart;
-      const userErrors = cartData?.cartCreate?.userErrors ?? [];
-      if (!cart || userErrors.length > 0) { setPhase('error-cart'); return; }
+        const cart = cartData?.cartCreate?.cart;
+        const userErrors = cartData?.cartCreate?.userErrors ?? [];
+        if (!cart || userErrors.length > 0) { setPhase('error-cart'); return; }
 
-      sessionStorage.setItem(
-        `booking_${bookingRef}`,
-        JSON.stringify({
-          ref: bookingRef, orderNumber,
-          serviceType: selectedService, serviceLabel: matched.productTitle,
-          price: matched.price, duration: service.duration,
-          location: form.location, date: form.date, timeSlot: form.timeSlot,
-          firstName: form.firstName, lastName: form.lastName,
-          email: form.email, phone: form.phone,
-          rego: form.rego.toUpperCase(), make: form.make, model: form.model, year: form.year,
-          cartId: cart.id, checkoutUrl: cart.checkoutUrl,
-        })
-      );
+        sessionStorage.setItem(`booking_${bookingRef}`, JSON.stringify({
+          ...bookingBase,
+          serviceLabel: matched.productTitle,
+          price: matched.price,
+          cartId: cart.id,
+          checkoutUrl: cart.checkoutUrl,
+        }));
 
-      setPhase('redirecting');
-      window.location.href = cart.checkoutUrl;
+        setPhase('redirecting');
+        window.location.href = cart.checkoutUrl;
+        return;
+      }
     } catch (err) {
-      console.error('Booking error:', err);
+      // Shopify query failed (network error, bad token, etc.) — fall through to server path
+      console.warn('Shopify product lookup failed, using server fallback:', err);
+    }
+
+    // ── Fallback: POST directly to ServiceNow server ──────────────────────
+    // Used when mock.shop or a store without Hub Service products is configured.
+    setPhase('creating-ticket');
+    try {
+      const res = await fetch(`${SERVER_URL}/api/servicenow/tickets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: bookingRef,
+          orderNumber,
+          customerName: `${form.firstName} ${form.lastName}`,
+          customerEmail: form.email,
+          summary: `Hub Service Booking — ${service.label} at ${form.location} on ${form.date} at ${form.timeSlot}`,
+          vehicleDetails: {
+            rego: form.rego.toUpperCase(),
+            make: form.make,
+            model: form.model,
+            year: parseInt(form.year),
+          },
+          serviceType: selectedService,
+          location: form.location,
+          appointmentDate: form.date,
+          appointmentTime: form.timeSlot,
+        }),
+      });
+
+      if (!res.ok) throw new Error('Server error');
+
+      sessionStorage.setItem(`booking_${bookingRef}`, JSON.stringify(bookingBase));
+
+      // Navigate to confirmation page — it will poll for the ticket by bookingRef
+      window.location.href = `/booking-confirmation?ref=${bookingRef}`;
+    } catch {
       setPhase('error-cart');
     }
   }
@@ -649,22 +702,6 @@ export default function BookingPage() {
             </div>
           </div>
 
-          {phase === 'error-no-product' && (
-            <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-lg">
-              <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="text-sm font-semibold text-red-800">Service product not found in Shopify</p>
-                <p className="text-xs text-red-600 mt-0.5">
-                  Hub Service products (product_type: "Hub Service") were not found on this storefront.
-                  Please contact support.
-                </p>
-                <button onClick={() => setPhase('idle')} className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-red-700 hover:text-red-800">
-                  <RefreshCw className="h-3 w-3" /> Retry
-                </button>
-              </div>
-            </div>
-          )}
-
           {phase === 'error-cart' && (
             <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-lg">
               <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
@@ -680,9 +717,10 @@ export default function BookingPage() {
 
           {phase === 'idle' && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800">
-              <strong>What happens next:</strong> Confirming queries Shopify for the service product,
-              creates a cart with your booking details as line item attributes, then redirects to
-              Shopify checkout. The order webhook auto-creates a ServiceNow job card.
+              <strong>What happens next:</strong> On a live Shopify store, this creates a cart with
+              your booking as line item attributes and redirects to Shopify checkout — the order webhook
+              then auto-creates a ServiceNow job card. On this demo storefront, the job card is created
+              directly and you'll be taken to the booking confirmation page.
             </div>
           )}
 
@@ -700,7 +738,7 @@ export default function BookingPage() {
             <button onClick={() => { setPhase('idle'); setStep(2); }} disabled={submitting} className={btnBack}>
               <ChevronLeft className="mr-1.5 h-4 w-4" /> Back
             </button>
-            <button onClick={handleConfirm} disabled={submitting || phase.startsWith('error')} className={btnNext}>
+            <button onClick={handleConfirm} disabled={submitting || phase === 'error-cart'} className={btnNext}>
               {submitting ? (
                 <>
                   <svg className="animate-spin h-4 w-4 mr-2" viewBox="0 0 24 24" fill="none">
