@@ -277,7 +277,7 @@ export default function BookingConfirmationPage() {
       </div>
 
       {/* ── Actions ───────────────────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row gap-3">
+      <div className="flex flex-col sm:flex-row gap-3 mb-8">
         <Button asChild className="flex-1">
           <Link to="/book-service">
             Book Another Service <ArrowRight className="ml-2 h-4 w-4" />
@@ -285,6 +285,22 @@ export default function BookingConfirmationPage() {
         </Button>
         <Button variant="outline" asChild className="flex-1">
           <Link to="/admin/tickets">View All Tickets</Link>
+        </Button>
+      </div>
+
+      {/* ── Demo mode callout ─────────────────────────────────────────────── */}
+      <div className="border border-slate-200 rounded-xl p-5 bg-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <p className="text-sm font-semibold text-slate-800">
+            Want to see the ServiceNow job card?
+          </p>
+          <p className="text-xs text-slate-500 mt-1 leading-relaxed max-w-md">
+            In production, your job card is created automatically when payment completes. Use
+            demo mode to simulate this.
+          </p>
+        </div>
+        <Button variant="outline" asChild className="flex-shrink-0">
+          <Link to="/demo">Open Demo Mode <ArrowRight className="ml-2 h-4 w-4" /></Link>
         </Button>
       </div>
     </div>

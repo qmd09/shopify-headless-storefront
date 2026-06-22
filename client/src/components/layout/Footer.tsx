@@ -99,9 +99,17 @@ export default function Footer() {
       </div>
 
       <div className="border-t border-slate-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 text-xs text-slate-500 text-center leading-relaxed">
-          © {new Date().getFullYear()} IAG Hub Services — Portfolio project by Tony Dinh demonstrating
-          Shopify eCommerce Engineer skills for IAG NZ Hub Services role.
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex flex-col sm:flex-row items-center justify-between gap-2">
+          <p className="text-xs text-slate-500 text-center leading-relaxed">
+            © {new Date().getFullYear()} IAG Hub Services — Portfolio project by Tony Dinh demonstrating
+            Shopify eCommerce Engineer skills for IAG NZ Hub Services role.
+          </p>
+          <Link
+            to="/demo"
+            className="text-xs text-slate-500 hover:text-slate-300 transition-colors flex-shrink-0"
+          >
+            Demo Mode
+          </Link>
         </div>
       </div>
     </footer>

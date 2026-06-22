@@ -15,6 +15,7 @@ import TicketsPage from './pages/TicketsPage';
 import ApiExplorerPage from './pages/ApiExplorerPage';
 import BookingPage from './pages/BookingPage';
 import BookingConfirmationPage from './pages/BookingConfirmationPage';
+import DemoPage from './pages/DemoPage';
 import './index.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
@@ -35,6 +36,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                 <Route path="/api-explorer" element={<ApiExplorerPage />} />
                 <Route path="/book-service" element={<BookingPage />} />
                 <Route path="/booking-confirmation" element={<BookingConfirmationPage />} />
+                <Route path="/demo" element={<DemoPage />} />
               </Routes>
             </main>
             <Footer />
