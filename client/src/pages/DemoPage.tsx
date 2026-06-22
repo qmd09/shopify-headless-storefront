@@ -416,7 +416,7 @@ function DemoPanel() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className={labelCls}>Rego</label>
-                  <input className={inputCls} value={form.rego} onChange={(e) => set('rego', e.target.value)} placeholder="ABC123" required />
+                  <input className={inputCls} value={form.rego} onChange={(e) => set('rego', e.target.value.toUpperCase())} onInput={(e) => { const el = e.currentTarget; el.value = el.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 6); }} placeholder="ABC123" maxLength={6} required />
                 </div>
                 <div>
                   <label className={labelCls}>Make</label>
@@ -428,7 +428,7 @@ function DemoPanel() {
                 </div>
                 <div>
                   <label className={labelCls}>Year</label>
-                  <input className={inputCls} type="number" min="1990" max="2026" value={form.year} onChange={(e) => set('year', e.target.value)} onInput={(e) => { const el = e.currentTarget; if (el.value.length > 4) el.value = el.value.slice(0, 4); }} placeholder="2019" required />
+                  <input className={inputCls} type="number" min="1990" max="2026" value={form.year} onChange={(e) => set('year', e.target.value)} onInput={(e) => { const el = e.currentTarget; if (el.value.length > 4) el.value = el.value.slice(0, 4); if (el.value.length === 4 && parseInt(el.value) > 2026) el.value = '2026'; }} placeholder="2019" required />
                 </div>
               </div>
             </div>
