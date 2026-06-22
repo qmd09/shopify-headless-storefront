@@ -1,15 +1,62 @@
 import { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Check, ChevronLeft, ChevronRight, MapPin, Clock, Car, AlertCircle, RefreshCw } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  MapPin,
+  Clock,
+  Car,
+  AlertCircle,
+  RefreshCw,
+  ShieldCheck,
+  Wrench,
+  Star,
+  Zap,
+  ArrowRight,
+} from 'lucide-react';
+import { Badge } from '../components/ui/badge';
 import { cn } from '../lib/utils';
 
-// ─── Config ────────────────────────────────────────────────────────────────────
+// ─── Service catalogue ─────────────────────────────────────────────────────────
 
-const SERVICE_MAP: Record<string, { label: string; price: number; duration: string }> = {
-  wof: { label: 'Warrant of Fitness (WoF)', price: 99, duration: '~45 mins' },
-  standard: { label: 'Standard Vehicle Service', price: 199, duration: '~2 hours' },
-  premium: { label: 'Premium Vehicle Service', price: 349, duration: '~3.5 hours' },
-};
+const SERVICE_CATALOGUE = [
+  {
+    type: 'wof',
+    icon: ShieldCheck,
+    title: 'Warrant of Fitness (WoF)',
+    price: 99,
+    duration: '~45 mins',
+    description: 'Certified WoF inspection by qualified technicians at your nearest AMI MotorHub.',
+    featured: false,
+  },
+  {
+    type: 'standard',
+    icon: Wrench,
+    title: 'Standard Vehicle Service',
+    price: 199,
+    duration: '~2 hours',
+    description: 'Oil change, filter replacement, fluid top-ups and comprehensive vehicle inspection.',
+    featured: true,
+  },
+  {
+    type: 'premium',
+    icon: Star,
+    title: 'Premium Vehicle Service',
+    price: 349,
+    duration: '~3.5 hours',
+    description: 'Full service including brake inspection, tyre rotation and complete diagnostics.',
+    featured: false,
+  },
+];
+
+type ServiceType = 'wof' | 'standard' | 'premium';
+
+const SERVICE_MAP = Object.fromEntries(
+  SERVICE_CATALOGUE.map((s) => [s.type, { label: s.title, price: s.price, duration: s.duration }])
+) as Record<ServiceType, { label: string; price: number; duration: string }>;
+
+// ─── Form config ───────────────────────────────────────────────────────────────
 
 const LOCATIONS = [
   'AMI MotorHub Auckland (Hobsonville)',
@@ -25,47 +72,14 @@ const TIME_SLOTS = [
 
 const STEPS = ['Location & Time', 'Vehicle Details', 'Review & Confirm'];
 
+// Max date: ~1 year ahead (browsers also enforce min/max, this validates typed values)
+const MAX_BOOKING_DATE = '2027-12-31';
+
+// ─── Shopify helpers ───────────────────────────────────────────────────────────
+
 const SHOPIFY_DOMAIN = import.meta.env.VITE_SHOPIFY_STORE_DOMAIN || 'mock.shop';
 const SHOPIFY_TOKEN = import.meta.env.VITE_SHOPIFY_STOREFRONT_TOKEN;
 const SHOPIFY_URL = `https://${SHOPIFY_DOMAIN}/api/2024-01/graphql.json`;
-
-// ─── Form state ────────────────────────────────────────────────────────────────
-
-interface FormData {
-  location: string;
-  date: string;
-  timeSlot: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  phone: string;
-  rego: string;
-  make: string;
-  model: string;
-  year: string;
-  notes: string;
-}
-
-const EMPTY_FORM: FormData = {
-  location: '',
-  date: '',
-  timeSlot: '',
-  firstName: '',
-  lastName: '',
-  email: '',
-  phone: '',
-  rego: '',
-  make: '',
-  model: '',
-  year: '',
-  notes: '',
-};
-
-function todayIso() {
-  return new Date().toISOString().split('T')[0];
-}
-
-// ─── Shopify helpers ───────────────────────────────────────────────────────────
 
 function shopifyHeaders(): HeadersInit {
   const h: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -84,7 +98,6 @@ async function shopifyQuery(query: string, variables?: Record<string, unknown>) 
   return json.data;
 }
 
-// Matches serviceType key to a product from the Hub Service catalogue
 function matchVariant(
   products: Array<{ title: string; variants: { edges: Array<{ node: { id: string; price: { amount: string } } }> } }>,
   serviceType: string
@@ -96,25 +109,61 @@ function matchVariant(
   };
   const match = matchers[serviceType];
   if (!match) return null;
-
   for (const p of products) {
     if (match(p.title)) {
-      const variantNode = p.variants.edges[0]?.node;
-      if (variantNode) return { variantId: variantNode.id, productTitle: p.title, price: variantNode.price.amount };
+      const node = p.variants.edges[0]?.node;
+      if (node) return { variantId: node.id, productTitle: p.title, price: node.price.amount };
     }
   }
   return null;
 }
 
-// ─── Booking phase type ────────────────────────────────────────────────────────
+// ─── Form types ────────────────────────────────────────────────────────────────
 
-type BookingPhase =
-  | 'idle'
-  | 'finding-product'
-  | 'creating-cart'
-  | 'redirecting'
-  | 'error-no-product'
-  | 'error-cart';
+interface FormData {
+  location: string;
+  date: string;
+  timeSlot: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  rego: string;
+  make: string;
+  model: string;
+  year: string;
+  notes: string;
+}
+
+const EMPTY_FORM: FormData = {
+  location: '', date: '', timeSlot: '',
+  firstName: '', lastName: '', email: '', phone: '',
+  rego: '', make: '', model: '', year: '', notes: '',
+};
+
+// Demo data for fast presentation filling
+const DEMO_FORM: FormData = {
+  location: 'AMI MotorHub Auckland (Hobsonville)',
+  date: '2026-08-15',
+  timeSlot: '10:00 AM',
+  firstName: 'Jane',
+  lastName: 'Smith',
+  email: 'jane.smith@iag.co.nz',
+  phone: '021 123 4567',
+  rego: 'ABC123',
+  make: 'Toyota',
+  model: 'Corolla',
+  year: '2019',
+  notes: 'Dashboard warning light on. Possible brake squeal from front-left.',
+};
+
+function todayIso() {
+  return new Date().toISOString().split('T')[0];
+}
+
+// ─── Booking phase ─────────────────────────────────────────────────────────────
+
+type BookingPhase = 'idle' | 'finding-product' | 'creating-cart' | 'redirecting' | 'error-no-product' | 'error-cart';
 
 const PHASE_LABELS: Partial<Record<BookingPhase, string>> = {
   'finding-product': 'Finding service product…',
@@ -126,16 +175,19 @@ const PHASE_LABELS: Partial<Record<BookingPhase, string>> = {
 
 export default function BookingPage() {
   const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
 
-  const serviceType = searchParams.get('type') || 'wof';
-  const service = SERVICE_MAP[serviceType] ?? SERVICE_MAP.wof;
+  // selectedService: initialise from URL param if valid, otherwise null (show selection screen)
+  const typeParam = searchParams.get('type') as ServiceType | null;
+  const [selectedService, setSelectedService] = useState<ServiceType | null>(
+    typeParam && SERVICE_MAP[typeParam] ? typeParam : null
+  );
 
   const [step, setStep] = useState(1);
   const [form, setForm] = useState<FormData>(EMPTY_FORM);
   const [errors, setErrors] = useState<Partial<FormData>>({});
   const [phase, setPhase] = useState<BookingPhase>('idle');
 
+  const service = selectedService ? SERVICE_MAP[selectedService] : null;
   const submitting = phase !== 'idle' && !phase.startsWith('error');
 
   const set = (field: keyof FormData, value: string) => {
@@ -143,12 +195,22 @@ export default function BookingPage() {
     setErrors((prev) => ({ ...prev, [field]: '' }));
   };
 
+  function fillDemoData() {
+    setForm(DEMO_FORM);
+    setErrors({});
+  }
+
   // ── Validation ──────────────────────────────────────────────────────────────
 
   function validateStep1(): boolean {
     const e: Partial<FormData> = {};
     if (!form.location) e.location = 'Please select a location';
-    if (!form.date) e.date = 'Please select a date';
+    if (!form.date) {
+      e.date = 'Please select a date';
+    } else {
+      const year = parseInt(form.date.split('-')[0], 10);
+      if (year < 2024 || year > 2027) e.date = 'Please choose a date between today and 2027';
+    }
     if (!form.timeSlot) e.timeSlot = 'Please select a time slot';
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -177,13 +239,12 @@ export default function BookingPage() {
     setStep((s) => s + 1);
   }
 
-  // ── Confirm booking — Shopify Cart flow ─────────────────────────────────────
+  // ── Confirm — Shopify Cart flow ─────────────────────────────────────────────
 
   async function handleConfirm() {
+    if (!selectedService || !service) return;
     setPhase('finding-product');
-
     try {
-      // 1. Query Shopify for Hub Service products
       const data = await shopifyQuery(`{
         products(first: 10, query: "product_type:Hub Service") {
           edges {
@@ -191,12 +252,7 @@ export default function BookingPage() {
               title
               handle
               variants(first: 1) {
-                edges {
-                  node {
-                    id
-                    price { amount }
-                  }
-                }
+                edges { node { id price { amount } } }
               }
             }
           }
@@ -206,93 +262,62 @@ export default function BookingPage() {
       const productNodes = (data?.products?.edges ?? []).map(
         (e: { node: { title: string; variants: { edges: Array<{ node: { id: string; price: { amount: string } } }> } } }) => e.node
       );
-      const matched = matchVariant(productNodes, serviceType);
+      const matched = matchVariant(productNodes, selectedService);
+      if (!matched) { setPhase('error-no-product'); return; }
 
-      if (!matched) {
-        setPhase('error-no-product');
-        return;
-      }
-
-      // 2. Generate booking reference
       const bookingRef = `BOOK-${Date.now()}`;
       const orderNumber = `#HUB-${Math.floor(Math.random() * 9000 + 1000)}`;
 
-      // 3. Create Shopify cart with line item attributes
       setPhase('creating-cart');
-
       const cartData = await shopifyQuery(
         `mutation CartCreate($input: CartInput!) {
           cartCreate(input: $input) {
-            cart {
-              id
-              checkoutUrl
-              totalQuantity
-            }
+            cart { id checkoutUrl totalQuantity }
             userErrors { field message }
           }
         }`,
         {
           input: {
-            lines: [
-              {
-                merchandiseId: matched.variantId,
-                quantity: 1,
-                attributes: [
-                  { key: 'Booking Ref', value: bookingRef },
-                  { key: 'Service Type', value: serviceType },
-                  { key: 'Location', value: form.location },
-                  { key: 'Appointment Date', value: form.date },
-                  { key: 'Appointment Time', value: form.timeSlot },
-                  { key: 'Vehicle Rego', value: form.rego.toUpperCase() },
-                  { key: 'Vehicle Make', value: form.make },
-                  { key: 'Vehicle Model', value: form.model },
-                  { key: 'Vehicle Year', value: form.year },
-                  { key: 'Customer Phone', value: form.phone },
-                  { key: 'Customer Name', value: `${form.firstName} ${form.lastName}` },
-                  { key: 'Customer Email', value: form.email },
-                ],
-              },
-            ],
+            lines: [{
+              merchandiseId: matched.variantId,
+              quantity: 1,
+              attributes: [
+                { key: 'Booking Ref', value: bookingRef },
+                { key: 'Service Type', value: selectedService },
+                { key: 'Location', value: form.location },
+                { key: 'Appointment Date', value: form.date },
+                { key: 'Appointment Time', value: form.timeSlot },
+                { key: 'Vehicle Rego', value: form.rego.toUpperCase() },
+                { key: 'Vehicle Make', value: form.make },
+                { key: 'Vehicle Model', value: form.model },
+                { key: 'Vehicle Year', value: form.year },
+                { key: 'Customer Phone', value: form.phone },
+                { key: 'Customer Name', value: `${form.firstName} ${form.lastName}` },
+                { key: 'Customer Email', value: form.email },
+              ],
+            }],
           },
         }
       );
 
       const cart = cartData?.cartCreate?.cart;
       const userErrors = cartData?.cartCreate?.userErrors ?? [];
+      if (!cart || userErrors.length > 0) { setPhase('error-cart'); return; }
 
-      if (!cart || userErrors.length > 0) {
-        console.error('Cart errors:', userErrors);
-        setPhase('error-cart');
-        return;
-      }
-
-      // 4. Persist booking data for the confirmation page (in case user comes back)
       sessionStorage.setItem(
         `booking_${bookingRef}`,
         JSON.stringify({
-          ref: bookingRef,
-          orderNumber,
-          serviceType,
-          serviceLabel: matched.productTitle,
-          price: matched.price,
-          duration: service.duration,
-          location: form.location,
-          date: form.date,
-          timeSlot: form.timeSlot,
-          firstName: form.firstName,
-          lastName: form.lastName,
-          email: form.email,
-          phone: form.phone,
-          rego: form.rego.toUpperCase(),
-          make: form.make,
-          model: form.model,
-          year: form.year,
-          cartId: cart.id,
-          checkoutUrl: cart.checkoutUrl,
+          ref: bookingRef, orderNumber,
+          serviceType: selectedService, serviceLabel: matched.productTitle,
+          price: matched.price, duration: service.duration,
+          location: form.location, date: form.date, timeSlot: form.timeSlot,
+          firstName: form.firstName, lastName: form.lastName,
+          email: form.email, phone: form.phone,
+          rego: form.rego.toUpperCase(), make: form.make, model: form.model, year: form.year,
+          cartId: cart.id, checkoutUrl: cart.checkoutUrl,
         })
       );
 
-      // 5. Redirect to Shopify checkout
       setPhase('redirecting');
       window.location.href = cart.checkoutUrl;
     } catch (err) {
@@ -301,42 +326,107 @@ export default function BookingPage() {
     }
   }
 
-  // ── Shared input styles ─────────────────────────────────────────────────────
+  // ── Shared styles ───────────────────────────────────────────────────────────
 
   const inputCls = (err?: string) =>
     cn(
       'w-full rounded-md border px-3 py-2 text-sm text-slate-800 outline-none transition-colors',
       'focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
-      err
-        ? 'border-red-400 bg-red-50'
-        : 'border-slate-200 bg-white hover:border-slate-300'
+      err ? 'border-red-400 bg-red-50' : 'border-slate-200 bg-white hover:border-slate-300'
     );
 
   const fieldCls = 'flex flex-col gap-1';
   const labelCls = 'text-sm font-medium text-slate-700';
   const errCls = 'text-xs text-red-600';
 
-  // Shared button classes for consistent sizing across all steps
   const btnBack = cn(
     'inline-flex items-center justify-center h-11 px-6 rounded-md text-sm font-medium transition-colors',
-    'bg-white text-slate-700 border border-slate-300 hover:bg-slate-50'
+    'bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed'
   );
   const btnNext = cn(
     'inline-flex items-center justify-center h-11 px-6 rounded-md text-sm font-medium transition-colors',
     'bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed'
   );
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  // ── Service selection screen ────────────────────────────────────────────────
+
+  if (!selectedService) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-10">
+        <div className="mb-8">
+          <h1 className="text-2xl font-bold text-slate-800">Book a Hub Service</h1>
+          <p className="text-slate-500 text-sm mt-1">
+            Select the service you'd like to book at an AMI MotorHub location.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+          {SERVICE_CATALOGUE.map(({ type, icon: Icon, title, price, duration, description, featured }) => (
+            <button
+              key={type}
+              onClick={() => setSelectedService(type as ServiceType)}
+              className={cn(
+                'text-left rounded-2xl p-5 flex flex-col gap-4 transition-all hover:shadow-md',
+                featured
+                  ? 'border-2 border-blue-600 bg-white shadow-sm'
+                  : 'border border-slate-200 bg-white hover:border-blue-300'
+              )}
+            >
+              {featured && (
+                <span className="self-start text-[10px] font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
+                  Most Popular
+                </span>
+              )}
+              <div className="flex items-start justify-between">
+                <div className={cn('w-11 h-11 rounded-xl flex items-center justify-center', featured ? 'bg-blue-100' : 'bg-slate-100')}>
+                  <Icon className={cn('h-5 w-5', featured ? 'text-blue-600' : 'text-slate-600')} />
+                </div>
+                <div className="text-right">
+                  <p className="text-xl font-bold text-slate-800">${price}</p>
+                  <p className="text-xs text-slate-400">{duration}</p>
+                </div>
+              </div>
+              <div>
+                <p className="font-semibold text-slate-800 text-sm mb-1">{title}</p>
+                <p className="text-xs text-slate-500 leading-relaxed">{description}</p>
+              </div>
+              <div className={cn('mt-auto flex items-center justify-center gap-1 h-9 rounded-lg text-sm font-medium transition-colors', featured ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200')}>
+                Select <ArrowRight className="h-3.5 w-3.5" />
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Form (steps 1–3) ────────────────────────────────────────────────────────
 
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 py-10">
-      {/* Page heading */}
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-slate-800">Book a Hub Service</h1>
-        <p className="text-slate-500 text-sm mt-1">
-          {service.label} · <span className="font-semibold text-slate-700">${service.price}</span>{' '}
-          · {service.duration}
-        </p>
+      {/* Page heading + demo fill + service badge */}
+      <div className="flex items-start justify-between gap-4 mb-8">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">Book a Hub Service</h1>
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
+            <Badge variant="info" className="text-xs">{service?.label}</Badge>
+            <span className="text-slate-400 text-xs">·</span>
+            <span className="text-slate-500 text-xs">${service?.price} · {service?.duration}</span>
+            <button
+              onClick={() => { setSelectedService(null); setStep(1); setForm(EMPTY_FORM); setErrors({}); setPhase('idle'); }}
+              className="text-xs text-blue-600 hover:text-blue-700 underline"
+            >
+              Change service
+            </button>
+          </div>
+        </div>
+        <button
+          onClick={fillDemoData}
+          className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 text-xs font-medium hover:bg-amber-100 transition-colors"
+          title="Auto-fill all fields with demo data for presentation"
+        >
+          <Zap className="h-3.5 w-3.5" /> Fill Demo
+        </button>
       </div>
 
       {/* Progress indicator */}
@@ -348,34 +438,18 @@ export default function BookingPage() {
           return (
             <div key={label} className="flex items-center flex-1 last:flex-none">
               <div className="flex flex-col items-center">
-                <div
-                  className={cn(
-                    'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-colors',
-                    isCompleted
-                      ? 'bg-green-600 text-white'
-                      : isActive
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-slate-200 text-slate-500'
-                  )}
-                >
+                <div className={cn(
+                  'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-colors',
+                  isCompleted ? 'bg-green-600 text-white' : isActive ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-500'
+                )}>
                   {isCompleted ? <Check className="h-4 w-4" /> : num}
                 </div>
-                <span
-                  className={cn(
-                    'text-xs mt-1.5 text-center leading-tight max-w-[70px]',
-                    isActive ? 'text-blue-600 font-semibold' : 'text-slate-400'
-                  )}
-                >
+                <span className={cn('text-xs mt-1.5 text-center leading-tight max-w-[70px]', isActive ? 'text-blue-600 font-semibold' : 'text-slate-400')}>
                   {label}
                 </span>
               </div>
               {idx < STEPS.length - 1 && (
-                <div
-                  className={cn(
-                    'flex-1 h-0.5 mx-2 mb-5 transition-colors',
-                    step > num ? 'bg-green-500' : 'bg-slate-200'
-                  )}
-                />
+                <div className={cn('flex-1 h-0.5 mx-2 mb-5 transition-colors', step > num ? 'bg-green-500' : 'bg-slate-200')} />
               )}
             </div>
           );
@@ -390,15 +464,9 @@ export default function BookingPage() {
               <MapPin className="inline h-3.5 w-3.5 mr-1 text-blue-500" />
               Location
             </label>
-            <select
-              className={inputCls(errors.location)}
-              value={form.location}
-              onChange={(e) => set('location', e.target.value)}
-            >
+            <select className={inputCls(errors.location)} value={form.location} onChange={(e) => set('location', e.target.value)}>
               <option value="">Select a MotorHub location…</option>
-              {LOCATIONS.map((loc) => (
-                <option key={loc} value={loc}>{loc}</option>
-              ))}
+              {LOCATIONS.map((loc) => <option key={loc} value={loc}>{loc}</option>)}
             </select>
             {errors.location && <p className={errCls}>{errors.location}</p>}
           </div>
@@ -410,6 +478,7 @@ export default function BookingPage() {
               className={inputCls(errors.date)}
               value={form.date}
               min={todayIso()}
+              max={MAX_BOOKING_DATE}
               onChange={(e) => set('date', e.target.value)}
             />
             {errors.date && <p className={errCls}>{errors.date}</p>}
@@ -422,15 +491,9 @@ export default function BookingPage() {
             </label>
             <div className="flex flex-wrap gap-2 mt-1">
               {TIME_SLOTS.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => set('timeSlot', t)}
-                  className={cn(
-                    'px-4 py-2 rounded-lg border text-sm font-medium transition-colors',
-                    form.timeSlot === t
-                      ? 'bg-blue-600 text-white border-blue-600'
-                      : 'bg-white text-slate-700 border-slate-200 hover:border-blue-400 hover:text-blue-600'
+                <button key={t} type="button" onClick={() => set('timeSlot', t)}
+                  className={cn('px-4 py-2 rounded-lg border text-sm font-medium transition-colors',
+                    form.timeSlot === t ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-700 border-slate-200 hover:border-blue-400 hover:text-blue-600'
                   )}
                 >
                   {t}
@@ -440,7 +503,6 @@ export default function BookingPage() {
             {errors.timeSlot && <p className={errCls}>{errors.timeSlot}</p>}
           </div>
 
-          {/* Step 1 nav — Next only */}
           <div className="pt-4">
             <button onClick={nextStep} className={btnNext}>
               Next <ChevronRight className="ml-2 h-4 w-4" />
@@ -488,7 +550,8 @@ export default function BookingPage() {
             <Car className="h-4 w-4 text-blue-500" /> Vehicle Details
           </p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* 2 per row: rego + make */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className={fieldCls}>
               <label className={labelCls}>Registration (Rego)</label>
               <input className={inputCls(errors.rego)} value={form.rego}
@@ -502,20 +565,23 @@ export default function BookingPage() {
                 onChange={(e) => set('make', e.target.value)} placeholder="Toyota" />
               {errors.make && <p className={errCls}>{errors.make}</p>}
             </div>
+          </div>
+
+          {/* 2 per row: model + year */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className={fieldCls}>
               <label className={labelCls}>Model</label>
               <input className={inputCls(errors.model)} value={form.model}
                 onChange={(e) => set('model', e.target.value)} placeholder="Corolla" />
               {errors.model && <p className={errCls}>{errors.model}</p>}
             </div>
-          </div>
-
-          <div className={cn(fieldCls, 'sm:max-w-[160px]')}>
-            <label className={labelCls}>Year</label>
-            <input type="number" className={inputCls(errors.year)} value={form.year}
-              onChange={(e) => set('year', e.target.value)} placeholder="2018"
-              min={1990} max={2026} />
-            {errors.year && <p className={errCls}>{errors.year}</p>}
+            <div className={fieldCls}>
+              <label className={labelCls}>Year</label>
+              <input type="number" className={inputCls(errors.year)} value={form.year}
+                onChange={(e) => set('year', e.target.value)} placeholder="2019"
+                min={1990} max={2026} />
+              {errors.year && <p className={errCls}>{errors.year}</p>}
+            </div>
           </div>
 
           <div className={fieldCls}>
@@ -523,15 +589,11 @@ export default function BookingPage() {
               Special Notes{' '}
               <span className="text-slate-400 font-normal">(optional)</span>
             </label>
-            <textarea
-              className={cn(inputCls(), 'resize-none h-20')}
-              value={form.notes}
+            <textarea className={cn(inputCls(), 'resize-none h-20')} value={form.notes}
               onChange={(e) => set('notes', e.target.value)}
-              placeholder="e.g. Dashboard warning light, unusual noise from front-left wheel…"
-            />
+              placeholder="e.g. Dashboard warning light, unusual noise from front-left wheel…" />
           </div>
 
-          {/* Step 2 nav — Back + Next, same height, mobile stacks with Next on top */}
           <div className="flex flex-col-reverse sm:flex-row sm:justify-between gap-3 pt-4">
             <button onClick={() => setStep(1)} className={btnBack}>
               <ChevronLeft className="mr-1.5 h-4 w-4" /> Back
@@ -546,14 +608,11 @@ export default function BookingPage() {
       {/* ── Step 3: Review & Confirm ─────────────────────────────────────── */}
       {step === 3 && (
         <div className="space-y-6">
-          {/* Summary card */}
           <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
             <div className="bg-blue-600 text-white px-6 py-4">
-              <p className="text-xs font-semibold uppercase tracking-widest text-blue-200 mb-1">
-                Booking Summary
-              </p>
-              <p className="text-lg font-bold">{service.label}</p>
-              <p className="text-blue-200 text-sm">{service.duration}</p>
+              <p className="text-xs font-semibold uppercase tracking-widest text-blue-200 mb-1">Booking Summary</p>
+              <p className="text-lg font-bold">{service?.label}</p>
+              <p className="text-blue-200 text-sm">{service?.duration}</p>
             </div>
 
             <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 p-6 text-sm">
@@ -563,9 +622,7 @@ export default function BookingPage() {
               </div>
               <div>
                 <dt className="text-slate-500 text-xs uppercase tracking-wide mb-0.5">Appointment</dt>
-                <dd className="font-medium text-slate-800">
-                  {form.date} at {form.timeSlot}
-                </dd>
+                <dd className="font-medium text-slate-800">{form.date} at {form.timeSlot}</dd>
               </div>
               <div>
                 <dt className="text-slate-500 text-xs uppercase tracking-wide mb-0.5">Customer</dt>
@@ -588,11 +645,10 @@ export default function BookingPage() {
 
             <div className="border-t border-slate-200 px-6 py-4 flex items-center justify-between bg-slate-50">
               <span className="text-sm font-semibold text-slate-700">Total</span>
-              <span className="text-xl font-bold text-blue-700">${service.price}</span>
+              <span className="text-xl font-bold text-blue-700">${service?.price}</span>
             </div>
           </div>
 
-          {/* Error: no product found */}
           {phase === 'error-no-product' && (
             <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-lg">
               <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
@@ -600,47 +656,36 @@ export default function BookingPage() {
                 <p className="text-sm font-semibold text-red-800">Service product not found in Shopify</p>
                 <p className="text-xs text-red-600 mt-0.5">
                   Hub Service products (product_type: "Hub Service") were not found on this storefront.
-                  Please contact support or try a different environment.
+                  Please contact support.
                 </p>
-                <button
-                  onClick={() => setPhase('idle')}
-                  className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-red-700 hover:text-red-800"
-                >
+                <button onClick={() => setPhase('idle')} className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-red-700 hover:text-red-800">
                   <RefreshCw className="h-3 w-3" /> Retry
                 </button>
               </div>
             </div>
           )}
 
-          {/* Error: cart creation failed */}
           {phase === 'error-cart' && (
             <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-lg">
               <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
               <div>
                 <p className="text-sm font-semibold text-red-800">Cart creation failed</p>
-                <p className="text-xs text-red-600 mt-0.5">
-                  Could not create a Shopify cart. Check the browser console for details.
-                </p>
-                <button
-                  onClick={() => setPhase('idle')}
-                  className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-red-700 hover:text-red-800"
-                >
+                <p className="text-xs text-red-600 mt-0.5">Check the browser console for details.</p>
+                <button onClick={() => setPhase('idle')} className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-red-700 hover:text-red-800">
                   <RefreshCw className="h-3 w-3" /> Retry
                 </button>
               </div>
             </div>
           )}
 
-          {/* Info banner */}
           {phase === 'idle' && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800">
-              <strong>What happens next:</strong> Confirming will query Shopify for the service
-              product, create a cart with your booking details as line item attributes, then redirect
-              you to Shopify checkout. The order webhook fires a ServiceNow job card automatically.
+              <strong>What happens next:</strong> Confirming queries Shopify for the service product,
+              creates a cart with your booking details as line item attributes, then redirects to
+              Shopify checkout. The order webhook auto-creates a ServiceNow job card.
             </div>
           )}
 
-          {/* Phase progress banner (while submitting) */}
           {submitting && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-center gap-3 text-sm text-blue-800">
               <svg className="animate-spin h-4 w-4 text-blue-600 flex-shrink-0" viewBox="0 0 24 24" fill="none">
@@ -651,20 +696,11 @@ export default function BookingPage() {
             </div>
           )}
 
-          {/* Step 3 nav — Back + Confirm, same height, mobile stacks with Confirm on top */}
           <div className="flex flex-col-reverse sm:flex-row sm:justify-between gap-3">
-            <button
-              onClick={() => { setPhase('idle'); setStep(2); }}
-              disabled={submitting}
-              className={cn(btnBack, 'disabled:opacity-50 disabled:cursor-not-allowed')}
-            >
+            <button onClick={() => { setPhase('idle'); setStep(2); }} disabled={submitting} className={btnBack}>
               <ChevronLeft className="mr-1.5 h-4 w-4" /> Back
             </button>
-            <button
-              onClick={handleConfirm}
-              disabled={submitting || phase.startsWith('error')}
-              className={btnNext}
-            >
+            <button onClick={handleConfirm} disabled={submitting || phase.startsWith('error')} className={btnNext}>
               {submitting ? (
                 <>
                   <svg className="animate-spin h-4 w-4 mr-2" viewBox="0 0 24 24" fill="none">

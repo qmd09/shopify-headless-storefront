@@ -491,7 +491,7 @@ export default function ApiExplorerPage() {
           <div>
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-500">
-                ServiceNow Integration API
+                Ticketing System Integration API
               </h2>
               <Badge variant="success" className="text-[10px] px-2 py-0.5">REST</Badge>
             </div>

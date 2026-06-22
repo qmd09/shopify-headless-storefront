@@ -1,4 +1,5 @@
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import {
   ShieldCheck,
   Wrench,
@@ -9,14 +10,10 @@ import {
   ArrowRight,
   Check,
   ExternalLink,
-  Boxes,
   Zap,
 } from 'lucide-react';
-import { useProducts } from '../hooks/useProduct';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
-import { Skeleton } from '../components/ui/skeleton';
-import { formatPrice } from '../lib/utils';
 
 // ─── Static data ───────────────────────────────────────────────────────────────
 
@@ -34,8 +31,7 @@ const SERVICES = [
     title: 'Warrant of Fitness',
     price: '$99',
     duration: '~45 mins',
-    description:
-      'Certified WoF inspection by qualified technicians at your nearest AMI MotorHub.',
+    description: 'Certified WoF inspection by qualified technicians at your nearest AMI MotorHub.',
     features: ['Digital inspection report', 'Component photographs provided', 'Same-day availability'],
     featured: false,
     label: 'Book WoF',
@@ -46,8 +42,7 @@ const SERVICES = [
     title: 'Standard Vehicle Service',
     price: '$199',
     duration: '~2 hours',
-    description:
-      'Oil change, filter replacement, fluid top-ups and comprehensive vehicle inspection.',
+    description: 'Oil change, filter replacement, fluid top-ups and comprehensive vehicle inspection.',
     features: ['OEM-quality parts', 'Digital service record', 'Courtesy car available'],
     featured: true,
     label: 'Book Standard',
@@ -58,8 +53,7 @@ const SERVICES = [
     title: 'Premium Vehicle Service',
     price: '$349',
     duration: '~3.5 hours',
-    description:
-      'Full service including brake inspection, tyre rotation and complete diagnostics.',
+    description: 'Full service including brake inspection, tyre rotation and complete diagnostics.',
     features: ['Full brake inspection', 'Tyre rotation included', 'Priority scheduling'],
     featured: false,
     label: 'Book Premium',
@@ -71,22 +65,19 @@ const HOW_IT_WORKS = [
     icon: Calendar,
     step: '01',
     title: 'Book Online',
-    description:
-      'Select your service, location and time slot. Enter your vehicle details to complete the booking.',
+    description: 'Select your service, location and time slot. Enter your vehicle details.',
   },
   {
     icon: Wrench,
     step: '02',
     title: 'We Take Care of It',
-    description:
-      'Drop off your vehicle. Our technicians get to work with real-time job card updates.',
+    description: 'Drop off your vehicle. Our technicians get to work with real-time job card updates.',
   },
   {
     icon: FileCheck,
     step: '03',
     title: 'ServiceNow Job Card Created',
-    description:
-      'Every booking automatically creates a ServiceNow incident for full workflow tracking across all locations.',
+    description: 'Every booking automatically creates a ServiceNow incident for full workflow tracking.',
   },
 ];
 
@@ -123,31 +114,10 @@ const HUB_LOCATIONS = [
 
 const FLOW_STEPS = ['Shopify Checkout', 'Order Webhook', 'Node.js Middleware', 'ServiceNow Job Card'];
 
-// ─── Helper: deterministic card accent colour from product id ─────────────────
-
-const PRODUCT_GRADIENTS = [
-  'from-blue-500 to-blue-700',
-  'from-violet-500 to-violet-700',
-  'from-emerald-500 to-emerald-700',
-  'from-orange-500 to-orange-700',
-  'from-pink-500 to-pink-700',
-  'from-cyan-500 to-cyan-700',
-];
-
-function productGradient(id: string): string {
-  const hash = id.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-  return PRODUCT_GRADIENTS[hash % PRODUCT_GRADIENTS.length];
-}
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function HomePage() {
   const navigate = useNavigate();
-  const { products, loading: productsLoading } = useProducts(9);
-
-  const catalogueProducts = products
-    .filter((p) => !p.productType?.toLowerCase().includes('hub'))
-    .slice(0, 3);
 
   return (
     <div>
@@ -161,7 +131,6 @@ export default function HomePage() {
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 md:py-28">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
-            {/* Left — copy */}
             <div>
               <p className="text-slate-400 text-xs font-semibold uppercase tracking-widest mb-4">
                 Supply Chain &amp; Hub Services · NZ Division
@@ -173,7 +142,7 @@ export default function HomePage() {
                 Vehicle repairs, servicing and WoF at AMI MotorHub locations across New Zealand.
                 Every booking auto-generates a ServiceNow job card.
               </p>
-              <div className="mt-8 flex flex-wrap gap-3">
+              <div className="mt-8">
                 <Button
                   size="lg"
                   className="bg-white text-slate-900 hover:bg-slate-100 border-0 font-semibold"
@@ -183,17 +152,9 @@ export default function HomePage() {
                     Book a Service <ArrowRight className="ml-2 h-4 w-4" />
                   </Link>
                 </Button>
-                <Button
-                  size="lg"
-                  className="bg-transparent text-white border border-white/40 hover:bg-white/10 hover:border-white/60"
-                  asChild
-                >
-                  <Link to="/admin/tickets">Track My Booking</Link>
-                </Button>
               </div>
             </div>
 
-            {/* Right — stats */}
             <div className="grid grid-cols-2 gap-4">
               {STATS.map(({ value, label }) => (
                 <div
@@ -240,18 +201,12 @@ export default function HomePage() {
 
                 <div className="p-6 flex flex-col gap-5 flex-1">
                   <div className="flex items-start justify-between">
-                    <div
-                      className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-                        featured ? 'bg-blue-100' : 'bg-slate-100'
-                      }`}
-                    >
+                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${featured ? 'bg-blue-100' : 'bg-slate-100'}`}>
                       <Icon className={`h-6 w-6 ${featured ? 'text-blue-600' : 'text-slate-600'}`} />
                     </div>
                     <div className="text-right">
                       <p className="text-2xl font-bold text-slate-800">{price}</p>
-                      <Badge variant="secondary" className="text-xs mt-1">
-                        {duration}
-                      </Badge>
+                      <Badge variant="secondary" className="text-xs mt-1">{duration}</Badge>
                     </div>
                   </div>
 
@@ -292,7 +247,6 @@ export default function HomePage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 relative">
-            {/* connecting line — visible on md+ */}
             <div className="hidden md:block absolute top-10 left-[calc(16.67%+1.5rem)] right-[calc(16.67%+1.5rem)] h-0.5 bg-blue-100" />
 
             {HOW_IT_WORKS.map(({ icon: Icon, step, title, description }) => (
@@ -336,12 +290,10 @@ export default function HomePage() {
                 <div className="flex items-start justify-between gap-3 mb-3">
                   <div className="flex items-start gap-3">
                     <div className="w-9 h-9 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0">
-                      <MapPin className="h-4.5 w-4.5 text-blue-600" />
+                      <MapPin className="h-4 w-4 text-blue-600" />
                     </div>
                     <div>
-                      <h3 className="font-semibold text-slate-800">
-                        {city} — {suburb}
-                      </h3>
+                      <h3 className="font-semibold text-slate-800">{city} — {suburb}</h3>
                       <p className="text-xs text-slate-500 mt-0.5">{address}</p>
                     </div>
                   </div>
@@ -350,10 +302,7 @@ export default function HomePage() {
 
                 <div className="flex flex-wrap gap-1.5 mb-4 ml-12">
                   {services.map((s) => (
-                    <span
-                      key={s}
-                      className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600"
-                    >
+                    <span key={s} className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
                       {s}
                     </span>
                   ))}
@@ -377,7 +326,6 @@ export default function HomePage() {
       <section className="bg-slate-800 text-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
-            {/* Left — copy */}
             <div>
               <div className="flex items-center gap-2 mb-4">
                 <Zap className="h-5 w-5 text-blue-400" />
@@ -393,17 +341,13 @@ export default function HomePage() {
                 teams get real-time visibility across all locations. No manual data entry. No missed
                 jobs.
               </p>
-              <Button
-                className="bg-blue-600 text-white hover:bg-blue-700 border-0"
-                asChild
-              >
+              <Button className="bg-blue-600 text-white hover:bg-blue-700 border-0" asChild>
                 <Link to="/admin/tickets">
                   View Live Tickets <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>
               </Button>
             </div>
 
-            {/* Right — flow diagram */}
             <div className="bg-slate-900/60 border border-slate-700 rounded-2xl p-6">
               <p className="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-5">
                 Integration Flow
@@ -427,87 +371,6 @@ export default function HomePage() {
                 Webhook fires on order.created · Node.js middleware · ServiceNow REST API
               </p>
             </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── SECTION 6: Supply Store Teaser ────────────────────────────────── */}
-      <section className="bg-slate-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
-          <div className="flex items-end justify-between mb-8">
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <Boxes className="h-4.5 w-4.5 text-blue-600" />
-                <span className="text-blue-600 text-xs font-semibold uppercase tracking-widest">
-                  Shopify Storefront API
-                </span>
-              </div>
-              <h2 className="text-2xl font-bold text-slate-800">Need Workshop Supplies?</h2>
-              <p className="text-slate-500 text-sm mt-1">
-                Order approved parts, consumables and safety equipment for your Hub location.
-              </p>
-            </div>
-            <Link
-              to="/products"
-              className="hidden sm:flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700"
-            >
-              Browse all <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
-          </div>
-
-          {productsLoading ? (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="rounded-xl overflow-hidden border border-slate-200 bg-white">
-                  <Skeleton className="h-40 rounded-none" />
-                  <div className="p-4 space-y-2">
-                    <Skeleton className="h-4 w-2/3" />
-                    <Skeleton className="h-4 w-1/3" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : catalogueProducts.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-              {catalogueProducts.map((product) => (
-                <Link
-                  key={product.id}
-                  to={`/products/${product.handle}`}
-                  className="group bg-white border border-slate-200 rounded-xl overflow-hidden hover:border-blue-200 hover:shadow-md transition-all"
-                >
-                  <div
-                    className={`h-36 bg-gradient-to-br ${productGradient(product.id)} flex items-center justify-center`}
-                  >
-                    <Boxes className="h-12 w-12 text-white/60" />
-                  </div>
-                  <div className="p-4">
-                    {product.productType && (
-                      <Badge variant="secondary" className="text-[10px] mb-2">
-                        {product.productType}
-                      </Badge>
-                    )}
-                    <p className="font-semibold text-slate-800 text-sm leading-snug group-hover:text-blue-700 transition-colors">
-                      {product.title}
-                    </p>
-                    <p className="text-blue-600 font-bold text-sm mt-1.5">
-                      {formatPrice(product.priceRange.minVariantPrice)}
-                    </p>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          ) : (
-            <p className="text-slate-400 text-sm text-center py-10">
-              No products found — check your Storefront API connection.
-            </p>
-          )}
-
-          <div className="text-center mt-8">
-            <Button variant="outline" asChild>
-              <Link to="/products">
-                Browse Supply Catalogue <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
-            </Button>
           </div>
         </div>
       </section>
