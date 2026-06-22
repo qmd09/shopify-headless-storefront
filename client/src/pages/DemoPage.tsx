@@ -428,7 +428,7 @@ function DemoPanel() {
                 </div>
                 <div>
                   <label className={labelCls}>Year</label>
-                  <input className={inputCls} type="number" min="1990" max="2026" value={form.year} onChange={(e) => set('year', e.target.value)} placeholder="2019" required />
+                  <input className={inputCls} type="number" min="1990" max="2026" value={form.year} onChange={(e) => set('year', e.target.value)} onInput={(e) => { const el = e.currentTarget; if (el.value.length > 4) el.value = el.value.slice(0, 4); }} placeholder="2019" required />
                 </div>
               </div>
             </div>
