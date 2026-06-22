@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Play, ChevronRight, Terminal, Zap } from 'lucide-react';
+import { Play, ChevronRight, Terminal, Zap, PencilLine } from 'lucide-react';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Skeleton } from '../components/ui/skeleton';
@@ -16,6 +16,7 @@ interface EndpointDef {
   apiType: ApiType;
   method: MethodType;
   codePreview: string;
+  defaultBody?: string; // if set, right panel shows an editable textarea instead of a read-only block
 }
 
 interface ResponseState {
@@ -163,12 +164,10 @@ async function executeGetProducts() {
 }
 
 async function executeGetProductByHandle() {
-  // Try to find any valid handle by fetching the first product
   const { data: listData } = await gqlFetch(
     `{ products(first: 1) { edges { node { handle } } } }`
   );
-  const handle =
-    listData?.data?.products?.edges?.[0]?.node?.handle ?? 'gift-card';
+  const handle = listData?.data?.products?.edges?.[0]?.node?.handle ?? 'gift-card';
   return gqlFetch(GQL_GET_PRODUCT_BY_HANDLE, { handle });
 }
 
@@ -177,15 +176,11 @@ async function executeCartCreate() {
 }
 
 async function executeCartLinesAdd() {
-  // Step 1: get a real variant ID
   const { data: listData } = await gqlFetch(
     `{ products(first: 1) { edges { node { variants(first: 1) { edges { node { id title } } } } } } }`
   );
-  const variantId =
-    listData?.data?.products?.edges?.[0]?.node?.variants?.edges?.[0]?.node?.id;
+  const variantId = listData?.data?.products?.edges?.[0]?.node?.variants?.edges?.[0]?.node?.id;
   if (!variantId) throw new Error('No products available on this storefront');
-
-  // Step 2: create a cart and add the variant in one shot via CART_CREATE with lines
   return gqlFetch(GQL_CART_CREATE, {
     input: { lines: [{ merchandiseId: variantId, quantity: 1 }] },
   });
@@ -197,8 +192,7 @@ async function executeGetCart() {
     return {
       status: 200,
       data: {
-        _note:
-          'No cart found in localStorage. Add an item to your cart via the storefront first, then try again.',
+        _note: 'No cart found in localStorage. Add an item via the storefront first.',
         cartId: null,
       },
     };
@@ -227,23 +221,63 @@ async function executeCreateTicket() {
 }
 
 async function executePatchTicket() {
-  // Fetch most recent ticket to patch
   const listRes = await fetch(`${SERVER_URL}/api/servicenow/tickets`);
   const tickets = await listRes.json();
   if (!tickets.length) {
-    return {
-      status: 200,
-      data: { _note: 'No tickets found. Use "Create Ticket" first.' },
-    };
+    return { status: 200, data: { _note: 'No tickets found. Use "Create Ticket" first.' } };
   }
-  const first = tickets[0];
-  const res = await fetch(`${SERVER_URL}/api/servicenow/tickets/${first.id}`, {
+  const res = await fetch(`${SERVER_URL}/api/servicenow/tickets/${tickets[0].id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({}),
   });
   return { status: res.status, data: await res.json() };
 }
+
+async function executeTestWebhook(body: string): Promise<{ status: number; data: unknown }> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    throw new Error('Request body is not valid JSON. Fix the syntax and try again.');
+  }
+  const res = await fetch(`${SERVER_URL}/webhooks/test-order`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(parsed),
+  });
+  return { status: res.status, data: await res.json() };
+}
+
+// ─── Default body for the test webhook endpoint ───────────────────────────────
+
+const WEBHOOK_DEFAULT_BODY = JSON.stringify(
+  {
+    id: 12345,
+    name: '#HUB-1001',
+    email: 'customer@example.com',
+    billing_address: { name: 'John Smith' },
+    line_items: [
+      {
+        title: 'Warrant of Fitness (WoF)',
+        price: '99.00',
+        properties: [
+          { name: 'Booking Ref', value: 'BOOK-1234567890' },
+          { name: 'Service Type', value: 'wof' },
+          { name: 'Location', value: 'AMI MotorHub Auckland (Hobsonville)' },
+          { name: 'Appointment Date', value: '2026-07-15' },
+          { name: 'Appointment Time', value: '10:00 AM' },
+          { name: 'Vehicle Rego', value: 'ABC123' },
+          { name: 'Vehicle Make', value: 'Toyota' },
+          { name: 'Vehicle Model', value: 'Corolla' },
+          { name: 'Vehicle Year', value: '2019' },
+        ],
+      },
+    ],
+  },
+  null,
+  2
+);
 
 // ─── Endpoint catalogue ───────────────────────────────────────────────────────
 
@@ -328,47 +362,49 @@ const SERVICENOW_ENDPOINTS: EndpointDef[] = [
     method: 'PATCH',
     codePreview: `PATCH ${SERVER_URL}/api/servicenow/tickets/:id\n\n{} // empty body cycles status automatically`,
   },
+  {
+    id: 'test-webhook',
+    name: 'Simulate Order Webhook',
+    description:
+      'POST /webhooks/test-order — simulates a Shopify orders/created webhook. Creates a ServiceNow job card from the order payload including Hub booking line item properties. Edit the JSON body before firing.',
+    apiType: 'rest',
+    method: 'POST',
+    codePreview: `POST ${SERVER_URL}/webhooks/test-order`,
+    defaultBody: WEBHOOK_DEFAULT_BODY,
+  },
 ];
 
 // ─── Execute dispatcher ───────────────────────────────────────────────────────
 
-async function executeEndpoint(id: string): Promise<{ status: number; data: unknown }> {
+async function executeEndpoint(
+  id: string,
+  editableBody: string
+): Promise<{ status: number; data: unknown }> {
   switch (id) {
-    case 'get-products':       return executeGetProducts();
+    case 'get-products':          return executeGetProducts();
     case 'get-product-by-handle': return executeGetProductByHandle();
-    case 'cart-create':        return executeCartCreate();
-    case 'cart-lines-add':     return executeCartLinesAdd();
-    case 'get-cart':           return executeGetCart();
-    case 'list-tickets':       return executeRestGet('/api/servicenow/tickets');
-    case 'create-ticket':      return executeCreateTicket();
-    case 'get-ticket':         return executeRestGet('/api/servicenow/tickets');
-    case 'patch-ticket':       return executePatchTicket();
-    default:                   throw new Error(`Unknown endpoint: ${id}`);
+    case 'cart-create':           return executeCartCreate();
+    case 'cart-lines-add':        return executeCartLinesAdd();
+    case 'get-cart':              return executeGetCart();
+    case 'list-tickets':          return executeRestGet('/api/servicenow/tickets');
+    case 'create-ticket':         return executeCreateTicket();
+    case 'get-ticket':            return executeRestGet('/api/servicenow/tickets');
+    case 'patch-ticket':          return executePatchTicket();
+    case 'test-webhook':          return executeTestWebhook(editableBody);
+    default:                      throw new Error(`Unknown endpoint: ${id}`);
   }
 }
 
-// ─── JSON syntax highlighter (safe — HTML-escapes values before injecting spans) ──
+// ─── JSON syntax highlighter ──────────────────────────────────────────────────
 
 function highlightJson(data: unknown): string {
   const raw = JSON.stringify(data, null, 2);
-
-  // HTML-escape the raw string (& < > only; " is preserved for regex matching)
   const safe = raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-  return (
-    safe
-      // Keys: "someKey":
-      .replace(
-        /"((?:[^"\\]|\\.)*)"(\s*:)/g,
-        '<span class="text-purple-300 font-medium">"$1"</span>$2'
-      )
-      // String values: : "..."
-      .replace(/:\s*"((?:[^"\\]|\\.)*)"/g, ': <span class="text-green-300">"$1"</span>')
-      // Numbers
-      .replace(/:\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\b/g, ': <span class="text-blue-300">$1</span>')
-      // Booleans + null
-      .replace(/:\s*(true|false|null)\b/g, ': <span class="text-orange-300">$1</span>')
-  );
+  return safe
+    .replace(/"((?:[^"\\]|\\.)*)"(\s*:)/g, '<span class="text-purple-300 font-medium">"$1"</span>$2')
+    .replace(/:\s*"((?:[^"\\]|\\.)*)"/g, ': <span class="text-green-300">"$1"</span>')
+    .replace(/:\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\b/g, ': <span class="text-blue-300">$1</span>')
+    .replace(/:\s*(true|false|null)\b/g, ': <span class="text-orange-300">$1</span>');
 }
 
 // ─── Method badge styling ─────────────────────────────────────────────────────
@@ -385,11 +421,13 @@ const METHOD_STYLES: Record<MethodType, string> = {
 
 export default function ApiExplorerPage() {
   const [selected, setSelected] = useState<EndpointDef | null>(null);
+  const [editableBody, setEditableBody] = useState('');
   const [response, setResponse] = useState<ResponseState | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleSelect = (ep: EndpointDef) => {
     setSelected(ep);
+    setEditableBody(ep.defaultBody ?? '');
     setResponse(null);
   };
 
@@ -399,7 +437,7 @@ export default function ApiExplorerPage() {
     setResponse(null);
     const start = Date.now();
     try {
-      const { status, data } = await executeEndpoint(selected.id);
+      const { status, data } = await executeEndpoint(selected.id, editableBody);
       setResponse({ data, status, timeMs: Date.now() - start });
     } catch (e) {
       setResponse({
@@ -491,6 +529,11 @@ export default function ApiExplorerPage() {
                     {selected.method}
                   </span>
                   <h3 className="font-semibold text-slate-800 truncate">{selected.name}</h3>
+                  {selected.defaultBody && (
+                    <span className="flex items-center gap-1 text-[10px] text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full flex-shrink-0">
+                      <PencilLine className="h-3 w-3" /> Editable
+                    </span>
+                  )}
                 </div>
                 <Button size="sm" onClick={handleTryIt} disabled={loading} className="flex-shrink-0">
                   {loading ? (
@@ -514,14 +557,30 @@ export default function ApiExplorerPage() {
                 {/* Description */}
                 <p className="text-sm text-slate-600 leading-relaxed">{selected.description}</p>
 
-                {/* Request block */}
+                {/* Request block — editable textarea OR read-only code block */}
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-2">
                     {selected.apiType === 'graphql' ? 'GraphQL Document' : 'Request'}
                   </p>
-                  <pre className="bg-slate-900 text-slate-300 rounded-lg p-4 text-xs leading-relaxed overflow-x-auto whitespace-pre-wrap break-words">
-                    {selected.codePreview}
-                  </pre>
+
+                  {selected.defaultBody != null ? (
+                    <>
+                      <p className="text-[11px] text-slate-400 mb-1.5 flex items-center gap-1">
+                        <PencilLine className="h-3 w-3" />
+                        Edit the JSON body below before clicking Try It
+                      </p>
+                      <textarea
+                        className="w-full bg-slate-900 text-slate-300 rounded-lg p-4 text-xs leading-relaxed font-mono resize-y min-h-[260px] outline-none focus:ring-2 focus:ring-blue-500"
+                        value={editableBody}
+                        onChange={(e) => setEditableBody(e.target.value)}
+                        spellCheck={false}
+                      />
+                    </>
+                  ) : (
+                    <pre className="bg-slate-900 text-slate-300 rounded-lg p-4 text-xs leading-relaxed overflow-x-auto whitespace-pre-wrap break-words">
+                      {selected.codePreview}
+                    </pre>
+                  )}
                 </div>
 
                 {/* Response block */}
@@ -611,6 +670,9 @@ function EndpointCard({
           {endpoint.name}
         </span>
         {isActive && <ChevronRight className="h-3.5 w-3.5 text-blue-600 ml-auto flex-shrink-0" />}
+        {endpoint.defaultBody && !isActive && (
+          <PencilLine className="h-3 w-3 text-amber-500 ml-auto flex-shrink-0" />
+        )}
       </div>
       <p className="text-xs text-slate-500 leading-snug line-clamp-2">
         {endpoint.description}

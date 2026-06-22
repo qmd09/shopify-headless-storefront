@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Check, ChevronLeft, ChevronRight, MapPin, Clock, Car } from 'lucide-react';
-import { Button } from '../components/ui/button';
+import { Check, ChevronLeft, ChevronRight, MapPin, Clock, Car, AlertCircle, RefreshCw } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 // ─── Config ────────────────────────────────────────────────────────────────────
@@ -26,7 +25,9 @@ const TIME_SLOTS = [
 
 const STEPS = ['Location & Time', 'Vehicle Details', 'Review & Confirm'];
 
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001';
+const SHOPIFY_DOMAIN = import.meta.env.VITE_SHOPIFY_STORE_DOMAIN || 'mock.shop';
+const SHOPIFY_TOKEN = import.meta.env.VITE_SHOPIFY_STOREFRONT_TOKEN;
+const SHOPIFY_URL = `https://${SHOPIFY_DOMAIN}/api/2024-01/graphql.json`;
 
 // ─── Form state ────────────────────────────────────────────────────────────────
 
@@ -64,6 +65,63 @@ function todayIso() {
   return new Date().toISOString().split('T')[0];
 }
 
+// ─── Shopify helpers ───────────────────────────────────────────────────────────
+
+function shopifyHeaders(): HeadersInit {
+  const h: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (SHOPIFY_TOKEN) h['X-Shopify-Storefront-Access-Token'] = SHOPIFY_TOKEN;
+  return h;
+}
+
+async function shopifyQuery(query: string, variables?: Record<string, unknown>) {
+  const res = await fetch(SHOPIFY_URL, {
+    method: 'POST',
+    headers: shopifyHeaders(),
+    body: JSON.stringify({ query, variables }),
+  });
+  const json = await res.json();
+  if (json.errors) throw new Error(json.errors[0]?.message ?? 'GraphQL error');
+  return json.data;
+}
+
+// Matches serviceType key to a product from the Hub Service catalogue
+function matchVariant(
+  products: Array<{ title: string; variants: { edges: Array<{ node: { id: string; price: { amount: string } } }> } }>,
+  serviceType: string
+): { variantId: string; productTitle: string; price: string } | null {
+  const matchers: Record<string, (t: string) => boolean> = {
+    wof: (t) => /warrant|wof/i.test(t),
+    standard: (t) => /standard/i.test(t),
+    premium: (t) => /premium/i.test(t),
+  };
+  const match = matchers[serviceType];
+  if (!match) return null;
+
+  for (const p of products) {
+    if (match(p.title)) {
+      const variantNode = p.variants.edges[0]?.node;
+      if (variantNode) return { variantId: variantNode.id, productTitle: p.title, price: variantNode.price.amount };
+    }
+  }
+  return null;
+}
+
+// ─── Booking phase type ────────────────────────────────────────────────────────
+
+type BookingPhase =
+  | 'idle'
+  | 'finding-product'
+  | 'creating-cart'
+  | 'redirecting'
+  | 'error-no-product'
+  | 'error-cart';
+
+const PHASE_LABELS: Partial<Record<BookingPhase, string>> = {
+  'finding-product': 'Finding service product…',
+  'creating-cart': 'Creating Shopify cart…',
+  redirecting: 'Redirecting to Shopify checkout…',
+};
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function BookingPage() {
@@ -76,7 +134,9 @@ export default function BookingPage() {
   const [step, setStep] = useState(1);
   const [form, setForm] = useState<FormData>(EMPTY_FORM);
   const [errors, setErrors] = useState<Partial<FormData>>({});
-  const [submitting, setSubmitting] = useState(false);
+  const [phase, setPhase] = useState<BookingPhase>('idle');
+
+  const submitting = phase !== 'idle' && !phase.startsWith('error');
 
   const set = (field: keyof FormData, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -117,47 +177,104 @@ export default function BookingPage() {
     setStep((s) => s + 1);
   }
 
-  // ── Confirm booking ─────────────────────────────────────────────────────────
+  // ── Confirm booking — Shopify Cart flow ─────────────────────────────────────
 
   async function handleConfirm() {
-    setSubmitting(true);
-    const bookingRef = `BOOK-${Date.now()}`;
-    const orderNumber = `#HUB-${Math.floor(Math.random() * 9000 + 1000)}`;
+    setPhase('finding-product');
 
     try {
-      const res = await fetch(`${SERVER_URL}/api/servicenow/tickets`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          orderId: bookingRef,
-          orderNumber,
-          customerName: `${form.firstName} ${form.lastName}`,
-          customerEmail: form.email,
-          summary: `Hub Service Booking — ${service.label} at ${form.location} on ${form.date} at ${form.timeSlot}`,
-          vehicleDetails: {
-            rego: form.rego.toUpperCase(),
-            make: form.make,
-            model: form.model,
-            year: parseInt(form.year),
+      // 1. Query Shopify for Hub Service products
+      const data = await shopifyQuery(`{
+        products(first: 10, query: "product_type:Hub Service") {
+          edges {
+            node {
+              title
+              handle
+              variants(first: 1) {
+                edges {
+                  node {
+                    id
+                    price { amount }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }`);
+
+      const productNodes = (data?.products?.edges ?? []).map(
+        (e: { node: { title: string; variants: { edges: Array<{ node: { id: string; price: { amount: string } } }> } } }) => e.node
+      );
+      const matched = matchVariant(productNodes, serviceType);
+
+      if (!matched) {
+        setPhase('error-no-product');
+        return;
+      }
+
+      // 2. Generate booking reference
+      const bookingRef = `BOOK-${Date.now()}`;
+      const orderNumber = `#HUB-${Math.floor(Math.random() * 9000 + 1000)}`;
+
+      // 3. Create Shopify cart with line item attributes
+      setPhase('creating-cart');
+
+      const cartData = await shopifyQuery(
+        `mutation CartCreate($input: CartInput!) {
+          cartCreate(input: $input) {
+            cart {
+              id
+              checkoutUrl
+              totalQuantity
+            }
+            userErrors { field message }
+          }
+        }`,
+        {
+          input: {
+            lines: [
+              {
+                merchandiseId: matched.variantId,
+                quantity: 1,
+                attributes: [
+                  { key: 'Booking Ref', value: bookingRef },
+                  { key: 'Service Type', value: serviceType },
+                  { key: 'Location', value: form.location },
+                  { key: 'Appointment Date', value: form.date },
+                  { key: 'Appointment Time', value: form.timeSlot },
+                  { key: 'Vehicle Rego', value: form.rego.toUpperCase() },
+                  { key: 'Vehicle Make', value: form.make },
+                  { key: 'Vehicle Model', value: form.model },
+                  { key: 'Vehicle Year', value: form.year },
+                  { key: 'Customer Phone', value: form.phone },
+                  { key: 'Customer Name', value: `${form.firstName} ${form.lastName}` },
+                  { key: 'Customer Email', value: form.email },
+                ],
+              },
+            ],
           },
-          serviceType,
-          location: form.location,
-          appointmentDate: form.date,
-          appointmentTime: form.timeSlot,
-        }),
-      });
+        }
+      );
 
-      if (!res.ok) throw new Error('Server error');
+      const cart = cartData?.cartCreate?.cart;
+      const userErrors = cartData?.cartCreate?.userErrors ?? [];
 
-      // Persist booking summary for confirmation page
+      if (!cart || userErrors.length > 0) {
+        console.error('Cart errors:', userErrors);
+        setPhase('error-cart');
+        return;
+      }
+
+      // 4. Persist booking data for the confirmation page (in case user comes back)
       sessionStorage.setItem(
         `booking_${bookingRef}`,
         JSON.stringify({
           ref: bookingRef,
           orderNumber,
           serviceType,
-          serviceLabel: service.label,
-          price: service.price,
+          serviceLabel: matched.productTitle,
+          price: matched.price,
           duration: service.duration,
           location: form.location,
           date: form.date,
@@ -170,14 +287,17 @@ export default function BookingPage() {
           make: form.make,
           model: form.model,
           year: form.year,
+          cartId: cart.id,
+          checkoutUrl: cart.checkoutUrl,
         })
       );
 
-      navigate(`/booking-confirmation?ref=${bookingRef}`);
-    } catch {
-      alert('Booking failed — is the Express server running on port 3001?');
-    } finally {
-      setSubmitting(false);
+      // 5. Redirect to Shopify checkout
+      setPhase('redirecting');
+      window.location.href = cart.checkoutUrl;
+    } catch (err) {
+      console.error('Booking error:', err);
+      setPhase('error-cart');
     }
   }
 
@@ -196,6 +316,16 @@ export default function BookingPage() {
   const labelCls = 'text-sm font-medium text-slate-700';
   const errCls = 'text-xs text-red-600';
 
+  // Shared button classes for consistent sizing across all steps
+  const btnBack = cn(
+    'inline-flex items-center justify-center h-11 px-6 rounded-md text-sm font-medium transition-colors',
+    'bg-white text-slate-700 border border-slate-300 hover:bg-slate-50'
+  );
+  const btnNext = cn(
+    'inline-flex items-center justify-center h-11 px-6 rounded-md text-sm font-medium transition-colors',
+    'bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed'
+  );
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
@@ -209,7 +339,7 @@ export default function BookingPage() {
         </p>
       </div>
 
-      {/* Progress bar */}
+      {/* Progress indicator */}
       <div className="flex items-start mb-10">
         {STEPS.map((label, idx) => {
           const num = idx + 1;
@@ -310,10 +440,11 @@ export default function BookingPage() {
             {errors.timeSlot && <p className={errCls}>{errors.timeSlot}</p>}
           </div>
 
+          {/* Step 1 nav — Next only */}
           <div className="pt-4">
-            <Button onClick={nextStep} size="lg" className="w-full sm:w-auto">
+            <button onClick={nextStep} className={btnNext}>
               Next <ChevronRight className="ml-2 h-4 w-4" />
-            </Button>
+            </button>
           </div>
         </div>
       )}
@@ -388,7 +519,10 @@ export default function BookingPage() {
           </div>
 
           <div className={fieldCls}>
-            <label className={labelCls}>Special Notes <span className="text-slate-400 font-normal">(optional)</span></label>
+            <label className={labelCls}>
+              Special Notes{' '}
+              <span className="text-slate-400 font-normal">(optional)</span>
+            </label>
             <textarea
               className={cn(inputCls(), 'resize-none h-20')}
               value={form.notes}
@@ -397,13 +531,14 @@ export default function BookingPage() {
             />
           </div>
 
-          <div className="flex gap-3 pt-2">
-            <Button variant="outline" onClick={() => setStep(1)}>
+          {/* Step 2 nav — Back + Next, same height, mobile stacks with Next on top */}
+          <div className="flex flex-col-reverse sm:flex-row sm:justify-between gap-3 pt-4">
+            <button onClick={() => setStep(1)} className={btnBack}>
               <ChevronLeft className="mr-1.5 h-4 w-4" /> Back
-            </Button>
-            <Button onClick={nextStep} size="lg">
+            </button>
+            <button onClick={nextStep} className={btnNext}>
               Review Booking <ChevronRight className="ml-2 h-4 w-4" />
-            </Button>
+            </button>
           </div>
         </div>
       )}
@@ -434,17 +569,13 @@ export default function BookingPage() {
               </div>
               <div>
                 <dt className="text-slate-500 text-xs uppercase tracking-wide mb-0.5">Customer</dt>
-                <dd className="font-medium text-slate-800">
-                  {form.firstName} {form.lastName}
-                </dd>
+                <dd className="font-medium text-slate-800">{form.firstName} {form.lastName}</dd>
                 <dd className="text-slate-500">{form.email}</dd>
                 <dd className="text-slate-500">{form.phone}</dd>
               </div>
               <div>
                 <dt className="text-slate-500 text-xs uppercase tracking-wide mb-0.5">Vehicle</dt>
-                <dd className="font-medium text-slate-800">
-                  {form.year} {form.make} {form.model}
-                </dd>
+                <dd className="font-medium text-slate-800">{form.year} {form.make} {form.model}</dd>
                 <dd className="text-slate-500">Rego: {form.rego.toUpperCase()}</dd>
               </div>
               {form.notes && (
@@ -461,28 +592,91 @@ export default function BookingPage() {
             </div>
           </div>
 
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800">
-            <strong>What happens next:</strong> Confirming will POST to our ServiceNow integration
-            server. A job card is created instantly and you'll see it on the confirmation page.
-          </div>
+          {/* Error: no product found */}
+          {phase === 'error-no-product' && (
+            <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-lg">
+              <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-red-800">Service product not found in Shopify</p>
+                <p className="text-xs text-red-600 mt-0.5">
+                  Hub Service products (product_type: "Hub Service") were not found on this storefront.
+                  Please contact support or try a different environment.
+                </p>
+                <button
+                  onClick={() => setPhase('idle')}
+                  className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-red-700 hover:text-red-800"
+                >
+                  <RefreshCw className="h-3 w-3" /> Retry
+                </button>
+              </div>
+            </div>
+          )}
 
-          <div className="flex gap-3">
-            <Button variant="outline" onClick={() => setStep(2)} disabled={submitting}>
+          {/* Error: cart creation failed */}
+          {phase === 'error-cart' && (
+            <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-lg">
+              <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-red-800">Cart creation failed</p>
+                <p className="text-xs text-red-600 mt-0.5">
+                  Could not create a Shopify cart. Check the browser console for details.
+                </p>
+                <button
+                  onClick={() => setPhase('idle')}
+                  className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-red-700 hover:text-red-800"
+                >
+                  <RefreshCw className="h-3 w-3" /> Retry
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Info banner */}
+          {phase === 'idle' && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800">
+              <strong>What happens next:</strong> Confirming will query Shopify for the service
+              product, create a cart with your booking details as line item attributes, then redirect
+              you to Shopify checkout. The order webhook fires a ServiceNow job card automatically.
+            </div>
+          )}
+
+          {/* Phase progress banner (while submitting) */}
+          {submitting && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-center gap-3 text-sm text-blue-800">
+              <svg className="animate-spin h-4 w-4 text-blue-600 flex-shrink-0" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+              </svg>
+              {PHASE_LABELS[phase]}
+            </div>
+          )}
+
+          {/* Step 3 nav — Back + Confirm, same height, mobile stacks with Confirm on top */}
+          <div className="flex flex-col-reverse sm:flex-row sm:justify-between gap-3">
+            <button
+              onClick={() => { setPhase('idle'); setStep(2); }}
+              disabled={submitting}
+              className={cn(btnBack, 'disabled:opacity-50 disabled:cursor-not-allowed')}
+            >
               <ChevronLeft className="mr-1.5 h-4 w-4" /> Back
-            </Button>
-            <Button size="lg" onClick={handleConfirm} disabled={submitting} className="flex-1 sm:flex-none">
+            </button>
+            <button
+              onClick={handleConfirm}
+              disabled={submitting || phase.startsWith('error')}
+              className={btnNext}
+            >
               {submitting ? (
                 <>
                   <svg className="animate-spin h-4 w-4 mr-2" viewBox="0 0 24 24" fill="none">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                   </svg>
-                  Confirming…
+                  {PHASE_LABELS[phase] ?? 'Processing…'}
                 </>
               ) : (
                 'Confirm Booking'
               )}
-            </Button>
+            </button>
           </div>
         </div>
       )}
